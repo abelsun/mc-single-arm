@@ -14,18 +14,18 @@ C-______________________________________________________________________________
 	include 'constants.inc'
 
 c Vector (real*4) for hut ntuples - needs to match dimension of variables
-	real*4		shms_hut(21)
+	real*4		shms_hut(23)
 	real*4          shms_spec(58)
 
-	real*4          hms_hut(15)
+	real*4          hms_hut(23)
 c
 	real*8 xs_num,ys_num,xc_sieve,yc_sieve
 	real*8 xsfr_num,ysfr_num,xc_frsieve,yc_frsieve
         logical use_front_sieve /.false./
-        logical use_sieve /.false./ 
+        logical use_sieve /.false./           
 c
         common /sieve_info/  xs_num,ys_num,xc_sieve,yc_sieve
-     > ,xsfr_num,ysfr_num,xc_frsieve,yc_frsieve,use_sieve
+     > ,xsfr_num,ysfr_num,xc_frsieve,yc_frsieve,use_sieve, use_front_sieve
 
 
 C Local declarations.
@@ -58,14 +58,16 @@ C Event limits, topdrawer limits, physics quantities
 
 	real*8 x_a,y_a,z_a,dydz_a,dif_a,dydz_aa,dif_aa   ! TH - for target aperture check
 	real*8 musc_targ_len			!target length for multiple scattering
+        real*8 foil_nm, foil_tk                 !multifoil target
+        parameter (foil_tk=0.02)
 	real*8 m2				!particle mass squared.
 	real*8 rad_len_cm			!conversion r.l. to cm for target
 	real*8 pathlen				!path length through spectrometer.
 	logical*4 ok_spec			!indicates whether event makes it in MC
 	integer*4 hit_calo                      !flag for hitting the calorimeter
 	integer*4 armSTOP_successes,armSTOP_trials
-        real *8 beam_energy, el_energy, theta_sc, tar_mass !elastic calibration
-
+        real *8 beam_energy, el_energy, theta_sc!elastic calibration
+        real *8 tar_mass, tar_atom_num          !elastic calibration
 C Initial and reconstructed track quantities.
 	real*8 dpp_init,dth_init,dph_init,xtar_init,ytar_init,ztar_init
 	real*8 dpp_recon,dth_recon,dph_recon,ztar_recon,ytar_recon
@@ -122,16 +124,19 @@ C using SIMC unstructured version
 C
 C SHMS
 	shmsSTOP_trials	= 0
+        shmsSTOP_targ_hor	= 0
+        shmsSTOP_targ_vert	= 0
+        shmsSTOP_targ_oct	= 0
+        shmsSTOP_FRONTSLIT_hor	= 0
+        shmsSTOP_FRONTSLIT_vert	= 0
 	shmsSTOP_HB_in	= 0
         shmsSTOP_HB_men = 0
 	shmsSTOP_HB_mex	= 0
 	shmsSTOP_HB_out	= 0	
-	shmsSTOP_targ_hor	= 0
-	shmsSTOP_targ_vert	= 0
-	shmsSTOP_targ_oct	= 0
-	shmsSTOP_slit_hor	= 0
-	shmsSTOP_slit_vert	= 0
-	shmsSTOP_slit_oct	= 0
+	shmsSTOP_DOWNSLIT	= 0
+	shmsSTOP_COLL_hor	= 0
+	shmsSTOP_COLL_vert	= 0
+	shmsSTOP_COLL_oct	= 0
 	shmsSTOP_Q1_in	= 0
 	shmsSTOP_Q1_men	= 0
 	shmsSTOP_Q1_mid	= 0
@@ -175,12 +180,16 @@ c	shmsSTOP_Q3_out6	= 0
 	shmsSTOP_s3	= 0
 	shmsSTOP_cal	= 0
 	shmsSTOP_successes	= 0
-	stop_id = 0
+	shmsSTOP_id = 0
 C HMS
 	hSTOP_trials	= 0
-	hSTOP_slit_hor	= 0
-	hSTOP_slit_vert	= 0
-	hSTOP_slit_oct	= 0
+	hSTOP_fAper_hor	= 0
+	hSTOP_fAper_vert= 0
+	hSTOP_fAper_oct	= 0
+	hSTOP_bAper_hor	= 0
+	hSTOP_bAper_vert= 0
+	hSTOP_bAper_oct	= 0
+	hSTOP_slit	= 0
 	hSTOP_Q1_in	= 0
 	hSTOP_Q1_mid	= 0
 	hSTOP_Q1_out	= 0
@@ -192,12 +201,17 @@ C HMS
 	hSTOP_Q3_out	= 0
 	hSTOP_D1_in	= 0
 	hSTOP_D1_out	= 0
+	hSTOP_VP1	= 0
+	hSTOP_VP2	= 0
+	hSTOP_VP3	= 0
+	hSTOP_VP4	= 0
 	hSTOP_hut	= 0
 	hSTOP_dc1	= 0
 	hSTOP_dc2	= 0
 	hSTOP_scin	= 0
 	hSTOP_cal	= 0
 	hSTOP_successes	= 0
+	hSTOP_id        = 0
 
 C Open setup file.
 
@@ -390,10 +404,29 @@ C Strip off header
      > stop 'ERROR: store_all in setup file!'
 	if (tmp_int.eq.1) store_all = .true.
 
-! Read in flag for carbon elastic if present
+!     Read in flag for 'beam energy(MeV)' to trigger on elastic event if present
+      beam_energy=-0.1  !by default do not use elastic event generator
+      tar_atom_num=12.  !by default it is carbon
+      read (chanin,1001,end=1000,err=1000) str_line
+      write(*,*),str_line(1:last_char(str_line))
+      iss = rd_real(str_line,beam_energy)
+      
+! Read in flag to use sieve
 	read (chanin,1001,end=1000,err=1000) str_line
 	write(*,*),str_line(1:last_char(str_line))
-	iss = rd_real(str_line,beam_energy)
+	if (.not.rd_int(str_line,tmp_int)) 
+     > stop 'ERROR: use_sieve in setup file!'
+	if (tmp_int.eq.1) then
+	  if (ispec.eq.1) use_sieve=.true.
+	  if (ispec.eq.2) use_sieve=.true.
+	  if (ispec.eq.2) use_front_sieve=.false.
+	endif
+
+!     Read in flag for 'target atomic number (Z+N)' for elastic event if present
+      read (chanin,1001,end=1000,err=1000) str_line
+      write(*,*),str_line(1:last_char(str_line))
+      iss = rd_real(str_line,tar_atom_num)
+
 
  1000	continue
 
@@ -442,8 +475,21 @@ C Units are cm.
 ! TH - use a double precision for random number generation here.
 	  x = gauss1(th_nsig_max) * gen_lim(4) / 6.0	!beam width
 	  y = gauss1(th_nsig_max) * gen_lim(5) / 6.0	!beam height
-	  z = (grnd() - 0.5) * gen_lim(6)		!along target
 
+          if(gen_lim(6).gt.0) then                      
+	     z = (grnd() - 0.5) * gen_lim(6)		!along target
+
+          elseif(gen_lim(6).eq.-3) then                 !optics1: three foils
+             foil_nm=3*grnd()-1.5                       !20um foils;  z=0, +/- 10cm
+             foil_nm=anint(foil_nm)                     != -1, 0, 1
+	     z = (grnd() - 0.5) * foil_tk + foil_nm * 10
+
+          elseif(gen_lim(6).eq.-2) then                 !optics2: two foils
+             foil_nm=grnd()                             !20um foils; z= +/- 5cm
+             foil_nm=anint(foil_nm)                     != 0, 1
+	     z = (grnd() - 0.5) * foil_tk - 5+ foil_nm * 10
+
+          endif
 C DJG Assume flat raster
 	  fr1 = (grnd() - 0.5) * gen_lim(7)   !raster x
 	  fr2 = (grnd() - 0.5) * gen_lim(8)   !raster y
@@ -468,7 +514,7 @@ C dxdz and dydz in HMS TRANSPORT coordinates.
      &          /1000.   + gen_lim_down(3)/1000.
 
 C Calculate for the elastic energy calibration using the beam energy.
-	  if(beam_energy.ne.0) then
+	  if(beam_energy.gt.0) then
 	     if(ispec.eq.2) then ! SHMS
 		theta_sc = acos((cos_ts-dydz*sin_ts)/sqrt(1. + dxdz**2. + dydz**2.))
 	     elseif(ispec.eq.1) then ! HMS
@@ -477,7 +523,7 @@ C Calculate for the elastic energy calibration using the beam energy.
 		write(6,*) 'Elastic scattering not set up for your spectrometer' 
 		STOP
 	     endif
-	     tar_mass = 12.*931.5 !carbon
+	     tar_mass = tar_atom_num*931.5 !carbon
 	     el_energy = tar_mass*beam_energy/(tar_mass+2.*beam_energy*(sin(theta_sc/2.))**2)
 	     dpp = (el_energy-p_spec)/p_spec*100.
 	  endif
@@ -610,7 +656,7 @@ c
      >          pathlen, 5)
 
 	     if (spec_ntuple) then
-		shms_spec(58) = stop_id
+		shms_spec(58) = shmsSTOP_id
 c            if (ok_spec) spec(58) =1.
 		call hfn(1412,shms_spec)
 	     endif
@@ -666,17 +712,21 @@ C for spectrometer ntuples
 	       shms_hut(14)= dph_recon/1000.
 	       shms_hut(15)= xtar_init
 	       shms_hut(16)= fry
-	       shms_hut(17)= xs_num
-	       shms_hut(18)= ys_num
-	       shms_hut(19)= xc_sieve
-	       shms_hut(20)= yc_sieve
-	       shms_hut(21)= stop_id
 	       if (use_front_sieve) then
 		  shms_hut(17)= xsfr_num
 		  shms_hut(18)= ysfr_num
 		  shms_hut(19)= xc_frsieve
 		  shms_hut(20)= yc_frsieve
 	       endif
+	       if (use_sieve) then
+		  shms_hut(17)= xs_num
+		  shms_hut(18)= ys_num
+		  shms_hut(19)= xc_sieve
+		  shms_hut(20)= yc_sieve
+	       endif
+	       shms_hut(21)= shmsSTOP_id
+	       shms_hut(22)= x
+	       shms_hut(23)= y
 	       call hfn(1411,shms_hut)
 	    endif
 	 endif
@@ -687,21 +737,27 @@ C for spectrometer ntuples
 	       hms_hut(2) = y_fp
 	       hms_hut(3) = dx_fp
 	       hms_hut(4) = dy_fp
-	       hms_hut(5) = ytar_init
-	       hms_hut(6) = dpp_init
-	       hms_hut(7) = dth_init/1000.
-	       hms_hut(8) = dph_init/1000.
-	       hms_hut(9) = ytar_recon
-	       hms_hut(10)= dpp_recon
-	       hms_hut(11)= dth_recon/1000.
+	       hms_hut(5) = xtar_init
+	       hms_hut(6) = ytar_init
+	       hms_hut(7) = dph_init/1000.
+	       hms_hut(8) = dth_init/1000.
+	       hms_hut(9) = ztar_init
+	       hms_hut(10)= dpp_init
+	       hms_hut(11)= ytar_recon
 	       hms_hut(12)= dph_recon/1000.
-	       hms_hut(13) = fry
-	       hms_hut(14)= ztar_init 
-	       if(ok_spec) then
-		  hms_hut(15)= 0
-	       else
-		  hms_hut(15)=99
+	       hms_hut(13)= dth_recon/1000.
+	       hms_hut(14)= ztar_recon
+	       hms_hut(15)= dpp_recon
+	       hms_hut(16)= fry
+	       if (use_sieve) then
+		  hms_hut(17)= xs_num
+		  hms_hut(18)= ys_num
+		  hms_hut(19)= xc_sieve
+		  hms_hut(20)= yc_sieve
 	       endif
+               hms_hut(21)=hSTOP_id
+	       hms_hut(22)= x
+	       hms_hut(23)= y
 	       call hfn(1,hms_hut)
 	    endif
 	 endif
@@ -745,20 +801,22 @@ C Close NTUPLE file.
 C Indicate where particles are lost in spectrometer.
 	if(ispec.eq.2) then
 	   write (chanout,1015)
-     >	   shmsSTOP_targ_hor,shmsSTOP_targ_vert,shmsSTOP_targ_oct,
-     >	   shmsSTOP_slit_hor,shmsSTOP_slit_vert,shmsSTOP_slit_oct,
-     >	   shmsSTOP_HB_in,shmsSTOP_HB_men,shmsSTOP_HB_mex,
-     >     shmsSTOP_HB_out,shmsSTOP_Q1_in,shmsSTOP_Q1_men,
-     >     shmsSTOP_Q1_mid,shmsSTOP_Q1_mex,shmsSTOP_Q1_out,
-     >	   shmsSTOP_Q2_in,shmsSTOP_Q2_men,shmsSTOP_Q2_mid,
-     >     shmsSTOP_Q2_mex,shmsSTOP_Q2_out,
-     >     shmsSTOP_Q3_in,shmsSTOP_Q3_men,shmsSTOP_Q3_mid,
-     >     shmsSTOP_Q3_mex,shmsSTOP_Q3_out,
-     >	   shmsSTOP_D1_in,shmsSTOP_D1_flr,shmsSTOP_D1_men,
-     >     shmsSTOP_D1_mid1,shmsSTOP_D1_mid2,shmsSTOP_D1_mid3,
-     >     shmsSTOP_D1_mid4,shmsSTOP_D1_mid5,shmsSTOP_D1_mid6,
-     >     shmsSTOP_D1_mid7,shmsSTOP_D1_mex,shmsSTOP_D1_out,
-     >     shmsSTOP_BP_in, shmsSTOP_BP_out
+     >        shmsSTOP_targ_hor,shmsSTOP_targ_vert,shmsSTOP_targ_oct,
+     >        shmsSTOP_FRONTSLIT_hor,shmsSTOP_FRONTSLIT_vert,
+     >        shmsSTOP_HB_in,shmsSTOP_HB_men,shmsSTOP_HB_mex,
+     >        shmsSTOP_HB_out,shmsSTOP_DOWNSLIT,
+     >        shmsSTOP_COLL_hor,shmsSTOP_COLL_vert,shmsSTOP_COLL_oct,
+     >        shmsSTOP_Q1_in,shmsSTOP_Q1_men,
+     >        shmsSTOP_Q1_mid,shmsSTOP_Q1_mex,shmsSTOP_Q1_out,
+     >        shmsSTOP_Q2_in,shmsSTOP_Q2_men,shmsSTOP_Q2_mid,
+     >        shmsSTOP_Q2_mex,shmsSTOP_Q2_out,
+     >        shmsSTOP_Q3_in,shmsSTOP_Q3_men,shmsSTOP_Q3_mid,
+     >        shmsSTOP_Q3_mex,shmsSTOP_Q3_out,
+     >        shmsSTOP_D1_in,shmsSTOP_D1_flr,shmsSTOP_D1_men,
+     >        shmsSTOP_D1_mid1,shmsSTOP_D1_mid2,shmsSTOP_D1_mid3,
+     >        shmsSTOP_D1_mid4,shmsSTOP_D1_mid5,shmsSTOP_D1_mid6,
+     >        shmsSTOP_D1_mid7,shmsSTOP_D1_mex,shmsSTOP_D1_out,
+     >        shmsSTOP_BP_in, shmsSTOP_BP_out
 
 	   write (chanout,1006)
      >	   shmsSTOP_trials,shmsSTOP_hut,shmsSTOP_dc1,shmsSTOP_dc2,
@@ -767,11 +825,14 @@ C Indicate where particles are lost in spectrometer.
 
 	elseif(ispec.eq.1) then
 	   write (chanout,1016)
-     >	   hSTOP_slit_hor,hSTOP_slit_vert,hSTOP_slit_oct,
-     >	   hSTOP_Q1_in,hSTOP_Q1_mid,hSTOP_Q1_out,
-     >	   hSTOP_Q2_in,hSTOP_Q2_mid,hSTOP_Q2_out,
-     >	   hSTOP_Q3_in,hSTOP_Q3_mid,hSTOP_Q3_out,
-     >	   hSTOP_D1_in,hSTOP_D1_out
+     >        hSTOP_fAper_hor,hSTOP_fAper_vert,hSTOP_fAper_oct,
+     >        hSTOP_bAper_hor,hSTOP_bAper_vert,hSTOP_bAper_oct,
+     >        hSTOP_slit,
+     >        hSTOP_Q1_in,hSTOP_Q1_mid,hSTOP_Q1_out,
+     >        hSTOP_Q2_in,hSTOP_Q2_mid,hSTOP_Q2_out,
+     >        hSTOP_Q3_in,hSTOP_Q3_mid,hSTOP_Q3_out,
+     >        hSTOP_D1_in,hSTOP_D1_out,
+     >        hSTOP_VP1,hSTOP_VP2,hSTOP_VP3,hSTOP_VP4
 
 	   write (chanout,1007)
      >	   hSTOP_trials,hSTOP_hut,hSTOP_dc1,hSTOP_dc2,hSTOP_scin,hSTOP_cal,
@@ -866,63 +927,74 @@ C =============================== Format Statements ============================
 1012	format(1x,16i4)
 
 1015	format(/,
-     >  i11,' stopped in the TARG APERT HOR',/
-     >  i11,' stopped in the TARG APERT VERT',/
-     >  i11,' stopped in the TARG APERT OCTAGON',/
-     >  i11,' stopped in the FIXED SLIT HOR',/
-     >  i11,' stopped in the FIXED SLIT VERT',/
-     >  i11,' stopped in the FIXED SLIT OCTAGON',/
-     >  i11,' stopped in HB ENTRANCE',/
-     >  i11,' stopped in HB MAG ENTRANCE',/
-     >  i11,' stopped in HB MAG EXIT',/
-     >  i11,' stopped in HB EXIT',/
-     >  i11,' stopped in Q1 ENTRANCE',/
-     >  i11,' stopped in Q1 MAG ENTRANCE',/
-     >  i11,' stopped in Q1 MIDPLANE',/
-     >  i11,' stopped in Q1 MAG EXIT',/
-     >  i11,' stopped in Q1 EXIT',/
-     >  i11,' stopped in Q2 ENTRANCE',/
-     >  i11,' stopped in Q2 MAG ENTRANCE',/
-     >  i11,' stopped in Q2 MIDPLANE',/
-     >  i11,' stopped in Q2 MAG EXIT',/
-     >  i11,' stopped in Q2 EXIT',/
-     >  i11,' stopped in Q3 ENTRANCE',/
-     >  i11,' stopped in Q3 MAG ENTRANCE',/
-     >  i11,' stopped in Q3 MIDPLANE',/
-     >  i11,' stopped in Q3 MAG EXIT',/
-     >  i11,' stopped in Q3 EXIT',/
-     >  i11,' stopped in D1 ENTRANCE',/
-     >  i11,' stopped in D1 FLARE',/
-     >  i11,' stopped in D1 MAG ENTRANCE',/
-     >  i11,' stopped in D1 MID-1',/
-     >  i11,' stopped in D1 MID-2',/
-     >  i11,' stopped in D1 MID-3',/
-     >  i11,' stopped in D1 MID-4',/
-     >  i11,' stopped in D1 MID-5',/
-     >  i11,' stopped in D1 MID-6',/
-     >  i11,' stopped in D1 MID-7',/
-     >  i11,' stopped in D1 MAG EXIT',/
-     >  i11,' stopped in D1 EXIT',/
-     >  i11,' stopped in BP ENTRANCE',/
-     >  i11,' stopped in BP EXIT',/
-     >  )
+     >     i11,' stopped in the TARG APERT HOR',/
+     >     i11,' stopped in the TARG APERT VERT',/
+     >     i11,' stopped in the TARG APERT OCTAGON',/
+     >     i11,' stopped in the FIXED FRONT SLIT HOR (id=-1)',/
+     >     i11,' stopped in the FIXED FRONT SLIT VERT (id=-1)',/
+     >     i11,' stopped in HB ENTRANCE (id=1)',/
+     >     i11,' stopped in HB MAG ENTRANCE (id=2)',/
+     >     i11,' stopped in HB MAG EXIT (id=3)',/
+     >     i11,' stopped in HB EXIT (id=4)',/
+     >     i11,' stopped in the DOWN SIEVE SLIT (id=99)',/
+     >     i11,' stopped in the COLLIMATOR HOR (id=5)',/
+     >     i11,' stopped in the COLLIMATOR VERT (id=5)',/
+     >     i11,' stopped in the COLLIMATOR OCTAGON (id=5)',/
+     >     i11,' stopped in Q1 ENTRANCE (id=6)',/
+     >     i11,' stopped in Q1 MAG ENTRANCE (id=7)',/
+     >     i11,' stopped in Q1 MIDPLANE (id=8)',/
+     >     i11,' stopped in Q1 MAG EXIT (id=9)',/
+     >     i11,' stopped in Q1 EXIT (id=10)',/
+     >     i11,' stopped in Q2 ENTRANCE (id=11)',/
+     >     i11,' stopped in Q2 MAG ENTRANCE (id=12)',/
+     >     i11,' stopped in Q2 MIDPLANE (id=13)',/
+     >     i11,' stopped in Q2 MAG EXIT (id=14)',/
+     >     i11,' stopped in Q2 EXIT (id=15)',/
+     >     i11,' stopped in Q3 ENTRANCE (id=16)',/
+     >     i11,' stopped in Q3 MAG ENTRANCE (id=17)',/
+     >     i11,' stopped in Q3 MIDPLANE (id=18)',/
+     >     i11,' stopped in Q3 MAG EXIT (id=19)',/
+     >     i11,' stopped in Q3 EXIT (id=20)',/
+     >     i11,' stopped in D1 ENTRANCE (id=21)',/
+     >     i11,' stopped in D1 FLARE (id=22)',/
+     >     i11,' stopped in D1 MAG ENTRANCE (id=23)',/
+     >     i11,' stopped in D1 MID-1 (id=24)',/
+     >     i11,' stopped in D1 MID-2 (id=25)',/
+     >     i11,' stopped in D1 MID-3 (id=26)',/
+     >     i11,' stopped in D1 MID-4 (id=27)',/
+     >     i11,' stopped in D1 MID-5 (id=28)',/
+     >     i11,' stopped in D1 MID-6 (id=29)',/
+     >     i11,' stopped in D1 MID-7 (id=30)',/
+     >     i11,' stopped in D1 MAG EXIT (id=31)',/
+     >     i11,' stopped in D1 EXIT (id=32)',/
+     >     i11,' stopped in BP ENTRANCE',/
+     >     i11,' stopped in BP EXIT',/
+     >     )
 
- 1016	format(/,
-     >  i11,' stopped in the FIXED SLIT HOR',/
-     >  i11,' stopped in the FIXED SLIT VERT',/
-     >  i11,' stopped in the FIXED SLIT OCTAGON',/
-     >  i11,' stopped in Q1 ENTRANCE',/
-     >  i11,' stopped in Q1 MIDPLANE',/
-     >  i11,' stopped in Q1 EXIT',/
-     >  i11,' stopped in Q2 ENTRANCE',/
-     >  i11,' stopped in Q2 MIDPLANE',/
-     >  i11,' stopped in Q2 EXIT',/
-     >  i11,' stopped in Q3 ENTRANCE',/
-     >  i11,' stopped in Q3 MIDPLANE',/
-     >  i11,' stopped in Q3 EXIT',/
-     >  i11,' stopped in D1 ENTRANCE',/
-     >  i11,' stopped in D1 EXIT',/
-     >  )
+ 1016 format(/,
+     >     i11,' stopped in the Front-end Aperture HOR (id=5)',/
+     >     i11,' stopped in the Front-end Aperture VERT (id=5)',/
+     >     i11,' stopped in the Front-end Aperture OCTAGON (id=5)',/
+     >     i11,' stopped in the Back-end Aperture HOR (id=6)',/
+     >     i11,' stopped in the Back-end Aperture VERT (id=6)',/
+     >     i11,' stopped in the Back-end Aperture OCTAGON (id=6)',/
+     >     i11,' stopped in Sieve Slit (id=99)',/
+     >     i11,' stopped in Q1 MAG ENTRANCE (id=7)',/
+     >     i11,' stopped in Q1 MIDPLANE (id=8)',/
+     >     i11,' stopped in Q1 MAG EXIT (id=9)',/
+     >     i11,' stopped in Q2 MAG ENTRANCE (id=12)',/
+     >     i11,' stopped in Q2 MIDPLANE (id=13)',/
+     >     i11,' stopped in Q2 MAG EXIT (id=14)',/
+     >     i11,' stopped in Q3 MAG ENTRANCE (id=17)',/
+     >     i11,' stopped in Q3 MIDPLANE (id=18)',/
+     >     i11,' stopped in Q3 MAG EXIT (id=19)',/
+     >     i11,' stopped in D1 ENTRANCE (id=23)',/
+     >     i11,' stopped in D1 EXIT (id=31)',/
+     >     i11,' stopped in Vacuum Pipe Plane-1 (id=32)',/
+     >     i11,' stopped in Vacuum Pipe Plane-2 (id=33)',/
+     >     i11,' stopped in Vacuum Pipe Plane-3 (id=34)',/
+     >     i11,' stopped in Vacuum Pipe Plane-4 (id=35)',/
+     >     )
 
 1100	format('!',79('-'),/,'! ',a,/,'!')
 1200	format(/,'! ',a,' Coefficients',/,/,
