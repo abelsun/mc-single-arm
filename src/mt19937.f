@@ -83,8 +83,10 @@ ccc      end
 * [KNUTH 1981, The Art of Computer Programming Vol. 2 (2nd Ed.), pp102]
 
       mt(0)= iand(seed,-1)
+      write(6,*) mt(0)
       do 1000 mti=1,N-1
         mt(mti) = iand(69069 * mt(mti-1),-1)
+        write(6,*) mt(mti)
  1000 continue
 
       return
